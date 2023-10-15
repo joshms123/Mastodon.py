@@ -65,12 +65,11 @@ except ImportError:
 def parse_version_string(version_string):
     """Parses a semver version string, stripping off "rc" stuff if present."""
     string_parts = version_string.split(".")
-    version_parts = [
+    return [
         int(re.match("([0-9]*)", string_parts[0]).group(0)),
         int(re.match("([0-9]*)", string_parts[1]).group(0)),
-        int(re.match("([0-9]*)", string_parts[2]).group(0))
+        int(re.match("([0-9]*)", string_parts[2]).group(0)),
     ]
-    return version_parts
 
 
 def bigger_version(version_string_a, version_string_b):
@@ -91,7 +90,7 @@ def api_version(created_ver, last_changed_ver, return_value_ver):
     """Version check decorator. Currently only checks Bigger Than."""
     def api_min_version_decorator(function):
         def wrapper(function, self, *args, **kwargs):
-            if not self.version_check_mode == "none":
+            if self.version_check_mode != "none":
                 if self.version_check_mode == "created":
                     version = created_ver
                 else:
@@ -99,19 +98,20 @@ def api_version(created_ver, last_changed_ver, return_value_ver):
                         last_changed_ver, return_value_ver)
                 major, minor, patch = parse_version_string(version)
                 if major > self.mastodon_major:
-                    raise MastodonVersionError(
-                        "Version check failed (Need version " + version + ")")
+                    raise MastodonVersionError(f"Version check failed (Need version {version})")
                 elif major == self.mastodon_major and minor > self.mastodon_minor:
                     print(self.mastodon_minor)
-                    raise MastodonVersionError(
-                        "Version check failed (Need version " + version + ")")
+                    raise MastodonVersionError(f"Version check failed (Need version {version})")
                 elif major == self.mastodon_major and minor == self.mastodon_minor and patch > self.mastodon_patch:
                     raise MastodonVersionError(
-                        "Version check failed (Need version " + version + ", patch is " + str(self.mastodon_patch) + ")")
+                        f"Version check failed (Need version {version}, patch is {str(self.mastodon_patch)})"
+                    )
             return function(self, *args, **kwargs)
+
         function.__doc__ = function.__doc__ + "\n\n        *Added: Mastodon v" + \
             created_ver + ", last changed: Mastodon v" + last_changed_ver + "*"
         return decorate(function, wrapper)
+
     return api_min_version_decorator
 
 ###
@@ -125,7 +125,7 @@ class AttribAccessDict(dict):
         if attr in self:
             return self[attr]
         else:
-            raise AttributeError("Attribute not found: " + str(attr))
+            raise AttributeError(f"Attribute not found: {str(attr)}")
 
     def __setattr__(self, attr, val):
         if attr in self:
@@ -142,7 +142,7 @@ class AttribAccessList(list):
         if attr in self:
             return self[attr]
         else:
-            raise AttributeError("Attribute not found: " + str(attr))
+            raise AttributeError(f"Attribute not found: {str(attr)}")
 
     def __setattr__(self, attr, val):
         if attr in self:
@@ -298,15 +298,21 @@ class Mastodon:
             if website is not None:
                 request_data['website'] = website
             if session:
-                ret = session.post(api_base_url + '/api/v1/apps',
-                                   data=request_data, timeout=request_timeout)
+                ret = session.post(
+                    f'{api_base_url}/api/v1/apps',
+                    data=request_data,
+                    timeout=request_timeout,
+                )
                 response = ret.json()
             else:
                 response = requests.post(
-                    api_base_url + '/api/v1/apps', data=request_data, timeout=request_timeout)
+                    f'{api_base_url}/api/v1/apps',
+                    data=request_data,
+                    timeout=request_timeout,
+                )
                 response = response.json()
         except Exception as e:
-            raise MastodonNetworkError("Could not complete request: %s" % e)
+            raise MastodonNetworkError(f"Could not complete request: {e}")
 
         if to_file is not None:
             with open(to_file, 'w') as secret_file:
@@ -378,7 +384,7 @@ class Mastodon:
         If no other `User-Agent` is specified, "mastodonpy" will be used.
         """
         self.api_base_url = None
-        if not api_base_url is None:
+        if api_base_url is not None:
             self.api_base_url = Mastodon.__protocolize(api_base_url)
 
         self.client_id = client_id
@@ -399,13 +405,9 @@ class Mastodon:
 
         self.request_timeout = request_timeout
 
-        if session:
-            self.session = session
-        else:
-            self.session = requests.Session()
-
+        self.session = session if session else requests.Session()
         self.feature_set = feature_set
-        if not self.feature_set in ["mainline", "fedibird", "pleroma"]:
+        if self.feature_set not in ["mainline", "fedibird", "pleroma"]:
             raise MastodonIllegalArgumentError('Requested invalid feature set')
 
         # General defined user-agent
@@ -419,35 +421,41 @@ class Mastodon:
                     self.client_secret = secret_file.readline().rstrip()
 
                     try_base_url = secret_file.readline().rstrip()
-                    if (not try_base_url is None) and len(try_base_url) != 0:
+                    if try_base_url is not None and len(try_base_url) != 0:
                         try_base_url = Mastodon.__protocolize(try_base_url)
-                        if not (self.api_base_url is None or try_base_url == self.api_base_url):
+                        if (
+                            self.api_base_url is None
+                            or try_base_url == self.api_base_url
+                        ):
+                            self.api_base_url = try_base_url
+
+                        else:
                             raise MastodonIllegalArgumentError(
                                 'Mismatch in base URLs between files and/or specified')
-                        self.api_base_url = try_base_url
-
                     # With new registrations we support the 4th line to store a client_name and use it as user-agent
                     client_name = secret_file.readline()
                     if client_name and self.user_agent is None:
                         self.user_agent = client_name.rstrip()
-            else:
-                if self.client_secret is None:
-                    raise MastodonIllegalArgumentError(
-                        'Specified client id directly, but did not supply secret')
+            elif self.client_secret is None:
+                raise MastodonIllegalArgumentError(
+                    'Specified client id directly, but did not supply secret')
 
         if self.access_token is not None and os.path.isfile(self.access_token):
             with open(self.access_token, 'r') as token_file:
                 self.access_token = token_file.readline().rstrip()
 
                 try_base_url = token_file.readline().rstrip()
-                if (not try_base_url is None) and len(try_base_url) != 0:
+                if try_base_url is not None and len(try_base_url) != 0:
                     try_base_url = Mastodon.__protocolize(try_base_url)
-                    if not (self.api_base_url is None or try_base_url == self.api_base_url):
+                    if (
+                        self.api_base_url is not None
+                        and try_base_url != self.api_base_url
+                    ):
                         raise MastodonIllegalArgumentError(
                             'Mismatch in base URLs between files and/or specified')
                     self.api_base_url = try_base_url
 
-        if not version_check_mode in ["created", "changed", "none"]:
+        if version_check_mode not in ["created", "changed", "none"]:
             raise MastodonIllegalArgumentError("Invalid version check method.")
         self.version_check_mode = version_check_mode
 
@@ -456,7 +464,7 @@ class Mastodon:
         self.mastodon_patch = 0
 
         # Versioning
-        if mastodon_version == None and self.version_check_mode != 'none':
+        if mastodon_version is None and self.version_check_mode != 'none':
             self.retrieve_mastodon_version()
         elif self.version_check_mode != 'none':
             try:
@@ -532,10 +540,9 @@ class Mastodon:
         """
         if client_id is None:
             client_id = self.client_id
-        else:
-            if os.path.isfile(client_id):
-                with open(client_id, 'r') as secret_file:
-                    client_id = secret_file.readline().rstrip()
+        elif os.path.isfile(client_id):
+            with open(client_id, 'r') as secret_file:
+                client_id = secret_file.readline().rstrip()
 
         params = dict()
         params['client_id'] = client_id
@@ -597,12 +604,14 @@ class Mastodon:
         except Exception as e:
             if username is not None or password is not None:
                 raise MastodonIllegalArgumentError(
-                    'Invalid user name, password, or redirect_uris: %s' % e)
+                    f'Invalid user name, password, or redirect_uris: {e}'
+                )
             elif code is not None:
                 raise MastodonIllegalArgumentError(
-                    'Invalid access token or redirect_uris: %s' % e)
+                    f'Invalid access token or redirect_uris: {e}'
+                )
             else:
-                raise MastodonIllegalArgumentError('Invalid request: %s' % e)
+                raise MastodonIllegalArgumentError(f'Invalid request: {e}')
 
         received_scopes = response["scope"].split(" ")
         for scope_set in self.__SCOPE_SETS.keys():
@@ -668,18 +677,17 @@ class Mastodon:
 
         # Step 1: Get a user-free token via oauth
         try:
-            oauth_params = {}
-            oauth_params['scope'] = " ".join(scopes)
-            oauth_params['client_id'] = self.client_id
-            oauth_params['client_secret'] = self.client_secret
-            oauth_params['grant_type'] = 'client_credentials'
-
+            oauth_params = {
+                'scope': " ".join(scopes),
+                'client_id': self.client_id,
+                'client_secret': self.client_secret,
+                'grant_type': 'client_credentials',
+            }
             response = self.__api_request(
                 'POST', '/oauth/token', oauth_params, do_ratelimiting=False)
             temp_access_token = response['access_token']
         except Exception as e:
-            raise MastodonIllegalArgumentError(
-                'Invalid request during oauth phase: %s' % e)
+            raise MastodonIllegalArgumentError(f'Invalid request during oauth phase: {e}')
 
         # Step 2: Use that to create a user
         try:
@@ -689,7 +697,7 @@ class Mastodon:
             self.__set_refresh_token(response.get('refresh_token'))
             self.__set_token_expired(int(response.get('expires_in', 0)))
         except Exception as e:
-            raise MastodonIllegalArgumentError('Invalid request: %s' % e)
+            raise MastodonIllegalArgumentError(f'Invalid request: {e}')
 
         # Step 3: Check scopes, persist, et cetera
         received_scopes = response["scope"].split(" ")
@@ -728,8 +736,7 @@ class Mastodon:
         """
         Internal, non-version-checking helper that does the same as instance()
         """
-        instance = self.__api_request('GET', '/api/v1/instance/')
-        return instance
+        return self.__api_request('GET', '/api/v1/instance/')
 
     @api_version("2.1.2", "2.1.2", __DICT_VERSION_ACTIVITY)
     def instance_activity(self):
@@ -939,10 +946,9 @@ class Mastodon:
         """
         if self.verify_minimum_version("3.0.0"):
             return self.status(id).card
-        else:
-            id = self.__unpack_id(id)
-            url = '/api/v1/statuses/{0}/card'.format(str(id))
-            return self.__api_request('GET', url)
+        id = self.__unpack_id(id)
+        url = '/api/v1/statuses/{0}/card'.format(str(id))
+        return self.__api_request('GET', url)
 
     @api_version("1.0.0", "1.0.0", __DICT_VERSION_CONTEXT)
     def status_context(self, id):
@@ -1037,14 +1043,13 @@ class Mastodon:
 
         Returns a list of `notification dicts`_.
         """
-        if not mentions_only is None:
-            if not exclude_types is None:
-                if mentions_only:
-                    exclude_types = ["follow", "favourite",
-                                     "reblog", "poll", "follow_request"]
-            else:
+        if mentions_only is not None:
+            if exclude_types is None:
                 raise MastodonIllegalArgumentError(
                     'Cannot specify exclude_types when mentions_only is present')
+            if mentions_only:
+                exclude_types = ["follow", "favourite",
+                                 "reblog", "poll", "follow_request"]
             del mentions_only
 
         if max_id != None:
@@ -1286,7 +1291,7 @@ class Mastodon:
         # Build filter regex
         filter_strings = []
         for keyword_filter in filters:
-            if not context in keyword_filter["context"]:
+            if context not in keyword_filter["context"]:
                 continue
 
             filter_string = re.escape(keyword_filter["phrase"])
@@ -1356,7 +1361,12 @@ class Mastodon:
         Internal Helper: Throw a MastodonVersionError if version is < 2.8.0 but parameters
         for search that are available only starting with 2.8.0 are specified.
         """
-        if not account_id is None or not offset is None or not min_id is None or not max_id is None:
+        if (
+            account_id is not None
+            or offset is not None
+            or min_id is not None
+            or max_id is not None
+        ):
             if self.verify_minimum_version("2.8.0", cached=True) == False:
                 raise MastodonVersionError(
                     "Advanced search parameters require Mastodon 2.8.0+")
@@ -1390,10 +1400,9 @@ class Mastodon:
         if self.verify_minimum_version("2.4.1", cached=True) == True:
             return self.search_v2(q, resolve=resolve, result_type=result_type, account_id=account_id,
                                   offset=offset, min_id=min_id, max_id=max_id)
-        else:
-            self.__ensure_search_params_acceptable(
-                account_id, offset, min_id, max_id)
-            return self.search_v1(q, resolve=resolve)
+        self.__ensure_search_params_acceptable(
+            account_id, offset, min_id, max_id)
+        return self.search_v1(q, resolve=resolve)
 
     @api_version("1.1.0", "2.1.0", "2.1.0")
     def search_v1(self, q, resolve=False):
@@ -1801,7 +1810,12 @@ class Mastodon:
                 raise MastodonIllegalArgumentError(
                     'content_type is only available with feature set pleroma')
             # It would be better to read this from nodeinfo and cache, but this is easier
-            if not content_type in ["text/plain", "text/html", "text/markdown", "text/bbcode"]:
+            if content_type not in [
+                "text/plain",
+                "text/html",
+                "text/markdown",
+                "text/bbcode",
+            ]:
                 raise MastodonIllegalArgumentError(
                     'Invalid content type specified')
 
@@ -1814,22 +1828,23 @@ class Mastodon:
         params_initial = locals()
 
         # Validate poll/media exclusivity
-        if not poll is None:
-            if (not media_ids is None) and len(media_ids) != 0:
+        if poll is not None:
+            if media_ids is not None and len(media_ids) != 0:
                 raise ValueError(
                     'Status can have media or poll attached - not both.')
 
-        # Validate visibility parameter
-        valid_visibilities = ['private', 'public', 'unlisted', 'direct']
-        if params_initial['visibility'] == None:
+        if params_initial['visibility'] is None:
             del params_initial['visibility']
         else:
             params_initial['visibility'] = params_initial['visibility'].lower()
+            # Validate visibility parameter
+            valid_visibilities = ['private', 'public', 'unlisted', 'direct']
             if params_initial['visibility'] not in valid_visibilities:
-                raise ValueError('Invalid visibility value! Acceptable '
-                                 'values are %s' % valid_visibilities)
+                raise ValueError(
+                    f'Invalid visibility value! Acceptable values are {valid_visibilities}'
+                )
 
-        if params_initial['language'] == None:
+        if params_initial['language'] is None:
             del params_initial['language']
 
         if params_initial['sensitive'] is False:
@@ -1841,24 +1856,18 @@ class Mastodon:
 
         if media_ids is not None:
             try:
-                media_ids_proper = []
                 if not isinstance(media_ids, (list, tuple)):
                     media_ids = [media_ids]
-                for media_id in media_ids:
-                    media_ids_proper.append(self.__unpack_id(media_id))
+                media_ids_proper = [self.__unpack_id(media_id) for media_id in media_ids]
             except Exception as e:
-                raise MastodonIllegalArgumentError("Invalid media "
-                                                   "dict: %s" % e)
+                raise MastodonIllegalArgumentError(f"Invalid media dict: {e}")
 
             params_initial["media_ids"] = media_ids_proper
 
-        if params_initial['content_type'] == None:
+        if params_initial['content_type'] is None:
             del params_initial['content_type']
 
-        use_json = False
-        if not poll is None:
-            use_json = True
-
+        use_json = poll is not None
         params = self.__generate_params(params_initial, ['idempotency_key'])
         return self.__api_request('POST', '/api/v1/statuses', params, headers=headers, use_json=use_json)
 
@@ -1900,17 +1909,21 @@ class Mastodon:
 
         if not untag:
             for account in to_status.mentions:
-                if account.id != user_id and not account.id in mentioned_accounts.keys():
+                if (
+                    account.id != user_id
+                    and account.id not in mentioned_accounts.keys()
+                ):
                     mentioned_accounts[account.id] = account.acct
 
         # Join into one piece of text. The space is added inside because of self-replies.
-        status = "".join(map(lambda x: "@" + x + " ",
-                         mentioned_accounts.values())) + status
+        status = (
+            "".join(map(lambda x: f"@{x} ", mentioned_accounts.values())) + status
+        )
 
         # Retain visibility / cw
-        if visibility == None and 'visibility' in to_status:
+        if visibility is None and 'visibility' in to_status:
             visibility = to_status.visibility
-        if spoiler_text == None and 'spoiler_text' in to_status:
+        if spoiler_text is None and 'spoiler_text' in to_status:
             spoiler_text = to_status.spoiler_text
 
         keyword_args["status"] = status
@@ -1957,9 +1970,9 @@ class Mastodon:
         Returns a `toot dict`_ with a new status that wraps around the reblogged one.
         """
         params = self.__generate_params(locals(), ['id'])
-        valid_visibilities = ['private', 'public', 'unlisted', 'direct']
         if 'visibility' in params:
             params['visibility'] = params['visibility'].lower()
+            valid_visibilities = ['private', 'public', 'unlisted', 'direct']
             if params['visibility'] not in valid_visibilities:
                 raise ValueError('Invalid visibility value! Acceptable '
                                  'values are %s' % valid_visibilities)
@@ -2176,7 +2189,7 @@ class Mastodon:
         id = self.__unpack_id(id)
         params = self.__generate_params(locals())
 
-        if params["reblogs"] == None:
+        if params["reblogs"] is None:
             del params["reblogs"]
 
         url = '/api/v1/accounts/{0}/follow'.format(str(id))
@@ -2299,9 +2312,9 @@ class Mastodon:
 
         # Create file info
         files = {}
-        if not avatar is None:
+        if avatar is not None:
             files["avatar"] = self.__load_media_file(avatar, avatar_mime_type)
-        if not header is None:
+        if header is not None:
             files["header"] = self.__load_media_file(header, header_mime_type)
 
         params = self.__generate_params(params_initial)
@@ -2396,7 +2409,7 @@ class Mastodon:
         params = self.__generate_params(locals())
 
         for context_val in context:
-            if not context_val in ['home', 'notifications', 'public', 'thread']:
+            if context_val not in ['home', 'notifications', 'public', 'thread']:
                 raise MastodonIllegalArgumentError('Invalid filter context.')
 
         return self.__api_request('POST', '/api/v1/filters', params)
@@ -2514,7 +2527,7 @@ class Mastodon:
         """
         account_id = self.__unpack_id(account_id)
 
-        if not status_ids is None:
+        if status_ids is not None:
             if not isinstance(status_ids, list):
                 status_ids = [status_ids]
             status_ids = list(map(lambda x: self.__unpack_id(x), status_ids))
@@ -2587,9 +2600,9 @@ class Mastodon:
             media_file, mime_type, file_name)}
 
         if focus != None:
-            focus = str(focus[0]) + "," + str(focus[1])
+            focus = f"{str(focus[0])},{str(focus[1])}"
 
-        if not thumbnail is None:
+        if thumbnail is not None:
             if not self.verify_minimum_version("3.2.0"):
                 raise MastodonVersionError(
                     'Thumbnail requires version > 3.2.0')
@@ -2606,18 +2619,17 @@ class Mastodon:
 
         # Wait for processing?
         if synchronous:
-            if self.verify_minimum_version("3.1.4"):
-                while not "url" in ret_dict or ret_dict.url == None:
-                    try:
-                        ret_dict = self.media(ret_dict)
-                        time.sleep(1.0)
-                    except:
-                        raise MastodonAPIError(
-                            "Attachment could not be processed")
-            else:
+            if not self.verify_minimum_version("3.1.4"):
                 # Old version always waits
                 return ret_dict
 
+            while "url" not in ret_dict or ret_dict.url is None:
+                try:
+                    ret_dict = self.media(ret_dict)
+                    time.sleep(1.0)
+                except:
+                    raise MastodonAPIError(
+                        "Attachment could not be processed")
         return ret_dict
 
     @api_version("2.3.0", "3.2.0", __DICT_VERSION_MEDIA)
@@ -2631,20 +2643,19 @@ class Mastodon:
         id = self.__unpack_id(id)
 
         if focus != None:
-            focus = str(focus[0]) + "," + str(focus[1])
+            focus = f"{str(focus[0])},{str(focus[1])}"
 
         params = self.__generate_params(
             locals(), ['id', 'thumbnail', 'thumbnail_mime_type'])
 
-        if not thumbnail is None:
-            if not self.verify_minimum_version("3.2.0"):
-                raise MastodonVersionError(
-                    'Thumbnail requires version > 3.2.0')
-            files = {"thumbnail": self.__load_media_file(
-                thumbnail, thumbnail_mime_type)}
-            return self.__api_request('PUT', '/api/v1/media/{0}'.format(str(id)), params, files=files)
-        else:
+        if thumbnail is None:
             return self.__api_request('PUT', '/api/v1/media/{0}'.format(str(id)), params)
+        if not self.verify_minimum_version("3.2.0"):
+            raise MastodonVersionError(
+                'Thumbnail requires version > 3.2.0')
+        files = {"thumbnail": self.__load_media_file(
+            thumbnail, thumbnail_mime_type)}
+        return self.__api_request('PUT', '/api/v1/media/{0}'.format(str(id)), params, files=files)
 
     @api_version("3.1.4", "3.1.4", __DICT_VERSION_MEDIA)
     def media(self, id):
@@ -2881,7 +2892,7 @@ class Mastodon:
 
         mod_statuses = ["active", "pending",
                         "disabled", "silenced", "suspended"]
-        if not status in mod_statuses:
+        if status not in mod_statuses:
             raise ValueError("Invalid moderation status requested.")
 
         if staff_only == True:
@@ -3000,7 +3011,7 @@ class Mastodon:
             send_email_notification = None
 
         id = self.__unpack_id(id)
-        if not report_id is None:
+        if report_id is not None:
             report_id = self.__unpack_id(report_id)
 
         params = self.__generate_params(locals(), ['id', 'action'])
@@ -3029,10 +3040,10 @@ class Mastodon:
         if since_id != None:
             since_id = self.__unpack_id(since_id, dateconv=True)
 
-        if not account_id is None:
+        if account_id is not None:
             account_id = self.__unpack_id(account_id)
 
-        if not target_account_id is None:
+        if target_account_id is not None:
             target_account_id = self.__unpack_id(target_account_id)
 
         if resolved == False:
@@ -3199,12 +3210,12 @@ class Mastodon:
             decode_size_x = decode_components_x * out_size[0]
             decode_size_y = decode_components_y * out_size[1]
 
-        # Decode
-        decoded_image = blurhash.decode(
-            media_dict["blurhash"], decode_size_x, decode_size_y, linear=return_linear)
-
-        # And that's pretty much it.
-        return decoded_image
+        return blurhash.decode(
+            media_dict["blurhash"],
+            decode_size_x,
+            decode_size_y,
+            linear=return_linear,
+        )
 
     ###
     # Pagination
@@ -3315,7 +3326,14 @@ class Mastodon:
         base = '/api/v1/streaming/hashtag'
         if local:
             base += '/local'
-        return self.__stream("{}?tag={}".format(base, tag), listener, run_async=run_async, timeout=timeout, reconnect_async=reconnect_async, reconnect_async_wait_sec=reconnect_async_wait_sec)
+        return self.__stream(
+            f"{base}?tag={tag}",
+            listener,
+            run_async=run_async,
+            timeout=timeout,
+            reconnect_async=reconnect_async,
+            reconnect_async_wait_sec=reconnect_async_wait_sec,
+        )
 
     @api_version("2.1.0", "2.1.0", __DICT_VERSION_STATUS)
     def stream_list(self, id, listener, run_async=False, timeout=__DEFAULT_STREAM_TIMEOUT, reconnect_async=False, reconnect_async_wait_sec=__DEFAULT_STREAM_RECONNECT_WAIT_SEC):
@@ -3324,7 +3342,14 @@ class Mastodon:
         list.
         """
         id = self.__unpack_id(id)
-        return self.__stream("/api/v1/streaming/list?list={}".format(id), listener, run_async=run_async, timeout=timeout, reconnect_async=reconnect_async, reconnect_async_wait_sec=reconnect_async_wait_sec)
+        return self.__stream(
+            f"/api/v1/streaming/list?list={id}",
+            listener,
+            run_async=run_async,
+            timeout=timeout,
+            reconnect_async=reconnect_async,
+            reconnect_async_wait_sec=reconnect_async_wait_sec,
+        )
 
     @api_version("2.6.0", "2.6.0", __DICT_VERSION_STATUS)
     def stream_direct(self, listener, run_async=False, timeout=__DEFAULT_STREAM_TIMEOUT, reconnect_async=False, reconnect_async_wait_sec=__DEFAULT_STREAM_RECONNECT_WAIT_SEC):
@@ -3339,9 +3364,7 @@ class Mastodon:
         Returns without True if streaming API is okay, False or raises an error otherwise.
         """
         api_okay = self.__api_request('GET', '/api/v1/streaming/health', base_url_override=self.__get_streaming_base(), parse=False)
-        if api_okay in [b'OK', b'success']:
-            return True
-        return False
+        return api_okay in [b'OK', b'success']
 
     ###
     # Internal helpers, dragons probably
@@ -3368,7 +3391,7 @@ class Mastodon:
         """
         Fetch the logged in user's ID, with caching. ID is reset on calls to log_in.
         """
-        if self.__logged_in_id == None:
+        if self.__logged_in_id is None:
             self.__logged_in_id = self.account_verify_credentials().id
         return self.__logged_in_id
 
@@ -3393,11 +3416,11 @@ class Mastodon:
             if k in known_date_fields:
                 if v != None:
                     try:
-                        if isinstance(v, int):
-                            json_object[k] = datetime.datetime.fromtimestamp(
-                                v, pytz.utc)
-                        else:
-                            json_object[k] = dateutil.parser.parse(v)
+                        json_object[k] = (
+                            datetime.datetime.fromtimestamp(v, pytz.utc)
+                            if isinstance(v, int)
+                            else dateutil.parser.parse(v)
+                        )
                     except:
                         raise MastodonAPIError('Encountered invalid date.')
         return json_object
@@ -3450,7 +3473,7 @@ class Mastodon:
         isotime = datetime_val.astimezone(
             pytz.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
         if isotime[-2] != ":":
-            isotime = isotime[:-2] + ":" + isotime[-2:]
+            isotime = f"{isotime[:-2]}:{isotime[-2:]}"
         return isotime
 
     def __api_request(self, method, endpoint, params={}, files={}, headers={}, access_token_override=None, base_url_override=None, do_ratelimiting=True, use_json=False, parse=True):

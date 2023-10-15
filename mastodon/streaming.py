@@ -182,15 +182,14 @@ class StreamListener(object):
         # The "for_stream" is right now only theoretical - it's only supported on websocket,
         # and we do not support websocket based multiplexed streams (yet).
         if "for_stream" in handler_args:
-            if handler != self.on_unknown_event:
-                handler(payload, for_stream)
-            else:
+            if handler == self.on_unknown_event:
                 handler(name, payload, for_stream)
-        else:
-            if handler != self.on_unknown_event:
-                handler(payload)
             else:
-                handler(name, payload)
+                handler(payload, for_stream)
+        elif handler != self.on_unknown_event:
+            handler(payload)
+        else:
+            handler(name, payload)
 
 
 class CallbackStreamListener(StreamListener):
@@ -217,7 +216,10 @@ class CallbackStreamListener(StreamListener):
             self.update_handler(status)
 
         try:
-            if self.local_update_handler != None and not "@" in status["account"]["acct"]:
+            if (
+                self.local_update_handler != None
+                and "@" not in status["account"]["acct"]
+            ):
                 self.local_update_handler(status)
         except Exception as err:
             six.raise_from(
